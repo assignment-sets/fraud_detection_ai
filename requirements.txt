@@ -6,3 +6,4 @@ python-dotenv
 flask
 sentence-transformers
 xgboost
+numpy

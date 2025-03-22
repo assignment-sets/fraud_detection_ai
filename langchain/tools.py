@@ -1,7 +1,9 @@
+from typing import List
 from langchain_core.tools import tool
 from utils.fraud_detection_handler import FraudDetectionHandler
 
 handler = FraudDetectionHandler()
+
 
 @tool
 def check_fraud_email_tool(email_text: str) -> bool:
@@ -32,16 +34,17 @@ def check_fraud_sms_tool(sms_text: str) -> bool:
 
 
 @tool
-def check_fraud_url_tool(url: str) -> bool:
+def check_fraud_url_tool(url_list: List[str]) -> bool:
     """
-    Detect if a given URL is potentially phishing or safe.
-    :param url: The URL to check.
-    :return: True if phishing, False if safe.
+    Detect if a given list of URLs are potentially phishing or safe.
+    :param url_list: The list of URLs to check.
+    :return: True if majority are phishing, False if majority are safe.
     """
     try:
-        return handler.check_fraud_url(url)
+        results = [handler.check_fraud_url(url) for url in url_list]
+        return results.count(True) > results.count(False)
     except Exception as e:
-        print(f"Error checking fraud URL: {str(e)}")
+        print(f"Error checking fraud URLs: {str(e)}")
         return False
 
 

@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Optional, Dict
+from typing import List, Optional, Dict, TypedDict
 
 class State(TypedDict):
     user_query: str  # The text input from the user (email/text/url to analyze)
@@ -23,3 +23,5 @@ class State(TypedDict):
     # A short LLM-generated explanation of why the final decision was made
     final_reasoning_summary: Optional[str]
     url_list: List[str]  # List of all the extracted urls
+    executed_tools: List[str]  # Track which tools have been executed
+    is_fake_news: Optional[bool]  # Result of news verification (True=fake, False=legitimate, None=not checked)

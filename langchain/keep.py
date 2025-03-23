@@ -1,9 +1,9 @@
 from langgraph.graph import StateGraph, START, END
 from typing import Optional, List, Literal, Dict, TypedDict
-from typing_extensions import TypedDict
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain.llm_instance import LLMInstance
 from langchain.tools import fetch_real_time_news_tool, check_fraud_url_tool, check_fraud_sms_tool, check_fraud_email_tool
+from pprint import pprint
 import re
 
 # ------------------ Define State ----------------------
@@ -16,8 +16,6 @@ class State(TypedDict):
     messages: List
     # List of tools that the agent can use (like fraud checkers, news fetcher)
     available_tools: List[str]
-    # The final decision or intermediate decision (e.g., "likely fraud", "clean", "fetch more data")
-    decision: Optional[str]
     # A step-by-step log of actions or reasoning the LLM performed
     list_of_actions: List[str]
     # Result of URL fraud detection (True = fraud, False = clean, None if not checked)
@@ -33,6 +31,8 @@ class State(TypedDict):
     url_list: List[str]  # List of all the extracted urls
     executed_tools: List[str]  # Track which tools have been executed
     is_fake_news: Optional[bool]  # Result of news verification (True=fake, False=legitimate, None=not checked)
+    news_verification_requested: Optional[bool]  # Flag to track if news verification has been requested
+    is_irrelevant_input: Optional[bool]  # Flag to track if the input is irrelevant to fraud detection
 
 # ------------------ Initialize the LLM instance ----------------------
 
@@ -62,6 +62,10 @@ When a user asks about news, use the fetch_real_time_news_tool to get recent hea
 - Always explain your reasoning based on the specific news articles you retrieved
 
 Be thorough in your analysis and explain your reasoning.
+
+IMPORTANT: If the user input is NOT related to fraud detection or doesn't contain any email, SMS, URL, or news to analyze, respond with a firm but polite message explaining that you are a fraud detection assistant and can only help with analyzing digital communications for fraud. DO NOT attempt to answer unrelated questions or engage with irrelevant input. Make it clear that the user needs to provide content for fraud analysis.
+
+IMPORTANT: After completing your analysis, ALWAYS provide a final conclusion that summarizes your findings. This will be used as the final reasoning summary.
 """
 
 print("✅ LLM and System Prompt initialized!")
@@ -95,6 +99,7 @@ def llm_node(state: State) -> State:
     4. Decides which tools to use
     5. Provides a response to the user
     6. For news queries, analyzes returned news articles to check if user's claim is supported
+    7. Handles irrelevant inputs that don't match any of the expected types
     """
     messages = state["messages"]
     
@@ -109,6 +114,12 @@ def llm_node(state: State) -> State:
         state["executed_tools"] = []
     if "is_fake_news" not in state:
         state["is_fake_news"] = None
+    if "news_verification_requested" not in state:
+        state["news_verification_requested"] = False
+    if "final_reasoning_summary" not in state:
+        state["final_reasoning_summary"] = None
+    if "is_irrelevant_input" not in state:
+        state["is_irrelevant_input"] = False
     
     # Ensure the system message is only added once
     if not any(isinstance(msg, SystemMessage) for msg in messages):
@@ -133,10 +144,18 @@ def llm_node(state: State) -> State:
         2. I've already extracted these URLs from the query: {extracted_urls if extracted_urls else 'None'}
         3. Decide which tools you need to use for fraud detection
         4. Update your understanding based on tool results
+        5. If the user query doesn't contain any email, SMS, URL, or news to analyze, mark it as irrelevant and respond accordingly
+        6. End your response with a clear FINAL CONCLUSION paragraph summarizing your findings.
+        
+        IMPORTANT: If the input does not appear to be related to fraud detection (email, SMS, URL, or news), respond with a firm but polite message stating that you are a fraud detection assistant and can only help with analyzing potential fraud in digital communications. DO NOT engage with irrelevant questions or inputs.
         """))
     
     # Check if news has been fetched and needs verification
-    elif "fetched_news" in state and state["fetched_news"] and state["is_fake_news"] is None:
+    elif "fetched_news" in state and state["fetched_news"] and (state["is_fake_news"] is None) and not state["news_verification_requested"]:
+        # Mark that we've requested news verification to prevent duplicate requests
+        state["news_verification_requested"] = True
+        state["list_of_actions"].append("Requesting news verification")
+        
         # News has been fetched but not yet verified - prompt LLM to analyze
         news_data = state["fetched_news"]
         news_context = ""
@@ -165,6 +184,9 @@ def llm_node(state: State) -> State:
         3. Provide your reasoning with specific references to the articles
         
         Remember: If none of the articles mention the topic or they contradict the claim, it's more likely to be fake news.
+        
+        IMPORTANT: End your analysis with a clear FINAL CONCLUSION paragraph that states whether the news is FAKE or LEGITIMATE.
+        This will be used as the final reasoning summary.
         """))
         
         # Invoke LLM for news verification
@@ -174,6 +196,31 @@ def llm_node(state: State) -> State:
             
             # Determine if news is fake based on the response
             content = news_verification_response.content.lower()
+            
+            # Extract final conclusion for final_reasoning_summary
+            final_conclusion = ""
+            if "final conclusion" in content:
+                # Get text after "final conclusion"
+                final_conclusion = content.split("final conclusion")[1].strip()
+                # If it contains a colon, take what's after the colon
+                if ":" in final_conclusion:
+                    final_conclusion = final_conclusion.split(":", 1)[1].strip()
+                # Get just the first paragraph
+                if "\n\n" in final_conclusion:
+                    final_conclusion = final_conclusion.split("\n\n")[0].strip()
+                elif "\n" in final_conclusion:
+                    final_conclusion = final_conclusion.split("\n")[0].strip()
+            
+            # If no specific final conclusion section, use the last paragraph
+            if not final_conclusion:
+                paragraphs = content.split("\n\n")
+                final_conclusion = paragraphs[-1].strip()
+                
+            # Save this as the final reasoning summary 
+            state["final_reasoning_summary"] = final_conclusion
+            state["list_of_actions"].append("Extracted final reasoning summary from news verification")
+            
+            # Determine is_fake_news value
             if "fake" in content or "false" in content or "not supported" in content or "no evidence" in content:
                 state["is_fake_news"] = True
                 state["list_of_actions"].append("Determined news is likely fake based on article analysis")
@@ -185,10 +232,6 @@ def llm_node(state: State) -> State:
                 state["is_fake_news"] = True
                 state["list_of_actions"].append("News verification inconclusive - treating as potentially fake")
             
-            # Set this as the final reasoning summary if not already set
-            if not state.get("final_reasoning_summary"):
-                state["final_reasoning_summary"] = news_verification_response.content
-            
             return {**state, "messages": messages}
             
         except Exception as e:
@@ -196,31 +239,22 @@ def llm_node(state: State) -> State:
             messages.append(AIMessage(content="I encountered an error while verifying the news. Treating it as potentially suspicious."))
             state["is_fake_news"] = True
             state["list_of_actions"].append(f"Error during news verification: {str(e)}")
+            state["final_reasoning_summary"] = "Error during news verification. Treating as potentially suspicious."
             return {**state, "messages": messages}
     
     # If this message follows tool execution, add appropriate context
     elif len(messages) > 1 and any(isinstance(msg, ToolMessage) for msg in messages[-3:]):
-        # Check if we need to process fetched news
-        needs_news_verification = False
-        for msg in messages[-3:]:
-            if isinstance(msg, ToolMessage) and "fetch_real_time_news_tool" in msg.content:
-                needs_news_verification = True
-                break
-        
-        if needs_news_verification and "fetched_news" in state and state["fetched_news"]:
-            # Don't add instructions - we'll handle news verification in the next loop iteration
-            pass
-        else:
-            # Add a system message to guide the LLM to use the tool results
-            messages.append(SystemMessage(content="""
-            Based on the tool results you've received:
-            1. Update your assessment of potential fraud
-            2. Decide if you need more information from other tools
-            3. If you've gathered enough information, provide a final assessment to the user
-            """))
+        # Add a system message to guide the LLM to use the tool results
+        messages.append(SystemMessage(content="""
+        Based on the tool results you've received:
+        1. Update your assessment of potential fraud
+        2. Decide if you need more information from other tools
+        3. If you've gathered enough information, provide a final assessment to the user
+        4. End your response with a clear FINAL CONCLUSION paragraph summarizing your findings.
+        """))
     
     # Invoke LLM with messages (except in the news verification case which is handled above)
-    if not (("fetched_news" in state and state["fetched_news"] and state["is_fake_news"] is None)):
+    if not (("fetched_news" in state and state["fetched_news"] and state["is_fake_news"] is None and not state["news_verification_requested"])):
         try:
             ai_response = llm_with_tools.invoke(messages)
             messages.append(ai_response)
@@ -230,18 +264,82 @@ def llm_node(state: State) -> State:
                 content = ai_response.content.lower()
                 possible_types = ["email", "sms", "url", "news"]
                 detected_types = [t for t in possible_types if t in content]
-                if detected_types:
+                
+                # Check if the response indicates this is an irrelevant input
+                irrelevant_indicators = [
+                    "i am a fraud detection assistant",
+                    "i can only help with",
+                    "i'm a fraud detection assistant",
+                    "i'm designed to analyze",
+                    "not related to fraud detection",
+                    "doesn't contain any email, sms, url, or news",
+                    "not an email, sms, url, or news",
+                    "please provide a digital communication",
+                    "i can only assist with fraud detection",
+                    "not within my scope"
+                ]
+                
+                is_irrelevant = any(indicator in content for indicator in irrelevant_indicators)
+                
+                if is_irrelevant:
+                    state["is_irrelevant_input"] = True
+                    state["input_types"] = ["irrelevant"]
+                    state["list_of_actions"].append("Detected irrelevant input not related to fraud detection")
+                    
+                    # Extract the final reasoning summary for irrelevant input
+                    if "final conclusion" in content:
+                        final_conclusion = content.split("final conclusion")[1].strip()
+                        if ":" in final_conclusion:
+                            final_conclusion = final_conclusion.split(":", 1)[1].strip()
+                        if "\n\n" in final_conclusion:
+                            final_conclusion = final_conclusion.split("\n\n")[0].strip()
+                        elif "\n" in final_conclusion:
+                            final_conclusion = final_conclusion.split("\n")[0].strip()
+                        state["final_reasoning_summary"] = final_conclusion
+                    else:
+                        # Default message for irrelevant inputs
+                        state["final_reasoning_summary"] = "I am a fraud detection assistant. I can only help with analyzing potential fraud in digital communications (emails, SMS, URLs, or news)."
+                    
+                    state["list_of_actions"].append("Set final reasoning summary for irrelevant input")
+                    
+                elif detected_types:
                     state["input_types"] = detected_types
                     state["list_of_actions"].append(f"Detected input types: {', '.join(detected_types)}")
+                    # If "news" is detected but not yet checked, set is_fake_news to None to indicate it needs verification
+                    if "news" in detected_types and state["is_fake_news"] is None:
+                        state["is_fake_news"] = None
+                        state["list_of_actions"].append("Marked news for verification")
             
-            # Check if the AI seems to be providing a final assessment
-            if not any(getattr(ai_response, "tool_calls", [])) and ("fraud" in ai_response.content.lower() or "legitimate" in ai_response.content.lower()):
-                if not state.get("final_reasoning_summary"):
-                    state["final_reasoning_summary"] = ai_response.content
+            # Check if we need to extract a final reasoning summary
+            if not getattr(ai_response, "tool_calls", []) and not state["final_reasoning_summary"]:
+                content = ai_response.content.lower()
+                
+                # Look for a final conclusion section
+                if "final conclusion" in content:
+                    # Get text after "final conclusion"
+                    final_conclusion = content.split("final conclusion")[1].strip()
+                    # If it contains a colon, take what's after the colon
+                    if ":" in final_conclusion:
+                        final_conclusion = final_conclusion.split(":", 1)[1].strip()
+                    # Get just the first paragraph
+                    if "\n\n" in final_conclusion:
+                        final_conclusion = final_conclusion.split("\n\n")[0].strip()
+                    elif "\n" in final_conclusion:
+                        final_conclusion = final_conclusion.split("\n")[0].strip()
+                    
+                    state["final_reasoning_summary"] = final_conclusion
+                    state["list_of_actions"].append("Extracted final reasoning summary from conclusion section")
+                else:
+                    # If no specific final conclusion, use the last paragraph as the summary
+                    paragraphs = ai_response.content.split("\n\n")
+                    if paragraphs:
+                        state["final_reasoning_summary"] = paragraphs[-1].strip()
+                        state["list_of_actions"].append("Used last paragraph as final reasoning summary")
         
         except Exception as e:
             print("❌ ERROR in LLM invocation:", str(e))
             messages.append(AIMessage(content=f"I encountered an error while analyzing your query. Please try again."))
+            state["final_reasoning_summary"] = "Error during analysis. Please try again."
     
     return {
         **state,
@@ -311,6 +409,8 @@ def tool_node(state: State) -> State:
                     state["list_of_actions"].append(f"Executed fetch_real_time_news_tool: Articles fetched")
                     # Reset is_fake_news to None to indicate news fetched but not yet verified
                     state["is_fake_news"] = None
+                    # Reset news_verification_requested flag
+                    state["news_verification_requested"] = False
                 
                 # Track executed tools to prevent redundant calls
                 state["executed_tools"].append(tool_signature)
@@ -329,7 +429,7 @@ def tool_node(state: State) -> State:
     
     return {**state, "messages": messages}
 
-def should_continue(state: State) -> Literal["tool_node", END]: # type: ignore
+def should_continue(state: State) -> Literal["tool_node", "llm", END]: # type: ignore
     """
     Determines if another tool call is needed or if execution should end.
     
@@ -338,14 +438,20 @@ def should_continue(state: State) -> Literal["tool_node", END]: # type: ignore
     2. Decides whether to continue to the tool node or end execution
     3. Ends if all necessary tools have been executed or if a final assessment has been made
     4. Special handling for news verification to ensure it completes properly
+    5. Ends immediately if the input is determined to be irrelevant
     """
     messages = state["messages"]
     
     if not messages:
         return END
     
+    # If the input is irrelevant and we have a final reasoning summary, end immediately
+    if state.get("is_irrelevant_input", False) and state.get("final_reasoning_summary"):
+        return END
+    
     # Special case: If news has been fetched but not verified, continue to LLM node
-    if "fetched_news" in state and state["fetched_news"] and state.get("is_fake_news") is None:
+    if ("fetched_news" in state and state["fetched_news"] and 
+        state.get("is_fake_news") is None and not state.get("news_verification_requested", False)):
         return "llm"
     
     # Find the last AI message
@@ -370,6 +476,12 @@ def should_continue(state: State) -> Literal["tool_node", END]: # type: ignore
     if "final_reasoning_summary" in state and state["final_reasoning_summary"]:
         return END
     
+    # If news is in input_types but no news verification has been done, make sure we don't end prematurely
+    if ("news" in state.get("input_types", []) and 
+        state.get("is_fake_news") is None and 
+        "fetched_news" in state and state["fetched_news"]):
+        return "llm"  # Force another LLM call to handle news verification
+    
     # If we've executed all possible tools based on input types, we're done
     input_types = state.get("input_types", [])
     executed_all_relevant_tools = False
@@ -382,10 +494,12 @@ def should_continue(state: State) -> Literal["tool_node", END]: # type: ignore
         executed_all_relevant_tools = True
     if "news" in input_types and "is_fake_news" in state and state["is_fake_news"] is not None:
         executed_all_relevant_tools = True
+    if "irrelevant" in input_types:
+        executed_all_relevant_tools = True
     
-    # If the last message is a tool response and all relevant tools executed, we're done
+    # If the last message is a tool response and all relevant tools executed, we need a final LLM call for conclusion
     if isinstance(messages[-1], ToolMessage) and executed_all_relevant_tools:
-        return END
+        return "llm"  # One more LLM call to get the final reasoning summary
     
     # By default, continue the conversation
     return END
@@ -407,6 +521,7 @@ graph_builder.add_conditional_edges(
     should_continue,  # Determines whether to call a tool or stop
     {
         "tool_node": "tool_node",  # If tools are required, execute them
+        "llm": "llm",  # Return to LLM node for news verification
         END: END,  # Otherwise, stop execution
     },
 )
@@ -420,15 +535,7 @@ workflow_graph = graph_builder.compile()
 if __name__ == '__main__':
     try:
         initial_state = {
-            "user_query": """
-                Dear Support Team,
-
-                I hope this message finds you well. I received an email with a link: https://unstop.com, saying elon musk is dead.
-
-                Furthermore, I found a few articles on https://chatgpt.com which doesnt say anythong about this news ?
-                i am not sure if elon is dead
-                Best regards,
-                User
+            "user_query": r"""hey i have just recieved the news that narendra modi died is it true ?
             """,
             "input_types": [],
             "messages": [],
@@ -438,7 +545,6 @@ if __name__ == '__main__':
                 "check_fraud_url_tool",
                 "fetch_real_time_news_tool"
             ],
-            "decision": None,
             "list_of_actions": [],
             "is_fraud_url": None,
             "is_fraud_sms": None,
@@ -447,13 +553,62 @@ if __name__ == '__main__':
             "final_reasoning_summary": None,
             "url_list": [],
             "executed_tools": [],
-            "is_fake_news": None
+            "is_fake_news": None,
+            "news_verification_requested": None,
+            "is_irrelevant_input": None
         }
 
         final_state = workflow_graph.invoke(initial_state)
-        print("===== Final State =====")
-        print(final_state)
+
+        def pretty_print_state(state: dict):
+            print("\n===== FINAL STATE =====")
+            
+            print(f"user_query:\n{state.get('user_query', '')}\n")
+            print(f"input_types: {state.get('input_types', [])}")
+            
+            print("\nmessages:")
+            for i, msg in enumerate(state.get("messages", []), start=1):
+                msg_type = getattr(msg, 'type', 'Unknown')
+                msg_preview = msg.content.strip()[:300].replace("\n", " ") + ("..." if len(msg.content.strip()) > 300 else "")
+                print(f"  {i}. [{msg_type}] {msg_preview}")
+            
+            print(f"\navailable_tools: {state.get('available_tools', [])}")
+            
+            print("\nlist_of_actions:")
+            actions = state.get("list_of_actions", [])
+            if actions:
+                for i, action in enumerate(actions, start=1):
+                    print(f"  {i}. {action}")
+            else:
+                print("  (empty)")
+            
+            print(f"\nis_fraud_url: {state.get('is_fraud_url')}")
+            print(f"is_fraud_sms: {state.get('is_fraud_sms')}")
+            print(f"is_fraud_email: {state.get('is_fraud_email')}")
+            
+            print(f"\nfetched_news:")
+            fetched_news = state.get('fetched_news')
+            if fetched_news:
+                pprint(fetched_news)
+            else:
+                print("  (empty)")
+            
+            print(f"\nfinal_reasoning_summary:\n{state.get('final_reasoning_summary')}\n")
+            print(f"url_list: {state.get('url_list', [])}")
+            
+            print("\nexecuted_tools:")
+            executed = state.get('executed_tools', [])
+            if executed:
+                for i, tool in enumerate(executed, start=1):
+                    print(f"  {i}. {tool}")
+            else:
+                print("  (empty)")
+            
+            print(f"\nis_fake_news: {state.get('is_fake_news')}")
+            print(f"\nis_irrelevant_input: {state.get('is_irrelevant_input')}")
+            print("\n===== END OF STATE =====")
+
+        pretty_print_state(final_state)
 
     except Exception as e:
         print("❌ Error occurred during execution:", str(e))
-

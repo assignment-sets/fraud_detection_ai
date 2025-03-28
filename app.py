@@ -90,12 +90,12 @@ def analyze_query():
         # Optional: Just return the final reasoning summary and key results in response
         response = {
             "final_reasoning_summary": final_state.get("final_reasoning_summary"),
-            "is_fraud_email": final_state.get("is_fraud_email"),
-            "is_fraud_sms": final_state.get("is_fraud_sms"),
-            "is_fraud_url": final_state.get("is_fraud_url"),
-            "is_fake_news": final_state.get("is_fake_news"),
-            "is_irrelevant_input": final_state.get("is_irrelevant_input"),
-            "actions_taken": final_state.get("list_of_actions"),
+            "is_fraud_email": bool(final_state.get("is_fraud_email")),  # Ensure it's always a bool
+            "is_fraud_sms": bool(final_state.get("is_fraud_sms")),
+            "is_fraud_url": bool(final_state.get("is_fraud_url")),
+            "is_fake_news": bool(final_state.get("is_fake_news")),
+            "is_irrelevant_input": bool(final_state.get("is_irrelevant_input")),
+            "actions_taken": final_state.get("list_of_actions") or [],  # Ensure list is not None
         }
 
         return jsonify(response)
@@ -106,4 +106,4 @@ def analyze_query():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)

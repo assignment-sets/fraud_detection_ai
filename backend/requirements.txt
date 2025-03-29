@@ -7,3 +7,4 @@ flask
 sentence-transformers
 xgboost
 numpy
+flask-cors

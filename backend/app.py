@@ -1,8 +1,10 @@
 from langchain.workflow_graph import workflow_graph
 from flask import Flask, request, jsonify
 from pprint import pprint
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 def pretty_print_state(state: dict):
     print("\n===== FINAL STATE =====")
@@ -52,6 +54,7 @@ def pretty_print_state(state: dict):
     print(f"\nis_fake_news: {state.get('is_fake_news')}")
     print("\n===== END OF STATE =====")
     
+
 @app.route('/analyze', methods=['POST'])
 def analyze_query():
     try:

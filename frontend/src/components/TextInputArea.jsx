@@ -35,13 +35,12 @@ const TextInputArea = ({ text, setText, isLoading }) => {
             className="pointer-events-none absolute top-0 left-0 p-5 text-gray-500 text-sm italic opacity-70"
             style={{ fontFamily: "'Roboto Mono', monospace" }}
           >
-            <span className="text-purple-400">#</span> Share your thoughts,
-            questions, or content for instant analysis...
+            <span className="text-purple-400">#</span> Share any email, text, SMS, URL, or news for instant fraud detection and analysis
             <p
               className="mt-2 text-xs text-gray-600"
               style={{ fontFamily: "'Inter', sans-serif" }}
             >
-              Our AI will analyze your text and provide detailed insights.
+              Our models will analyze your text and provide detailed insights.
             </p>
           </div>
         )}

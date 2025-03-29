@@ -7,6 +7,7 @@ import {
   TextInputArea,
   Header,
 } from "./components";
+import { AlertTriangle } from "lucide-react";
 
 function App() {
   const [text, setText] = useState("");
@@ -30,7 +31,7 @@ function App() {
       console.error("Error analyzing text:", err);
       setError(
         err.response?.data?.message ||
-          "Failed to analyze text. Please try again."
+          "Failed to analyze text. Please try again later."
       );
     } finally {
       setIsLoading(false);
@@ -54,7 +55,8 @@ function App() {
           </div>
 
           {error && (
-            <div className="mt-6 p-4 bg-red-900/30 border border-red-700 rounded-lg text-red-300">
+            <div className="mt-6 p-4 bg-red-900/30 border border-red-700 rounded-lg text-red-300 flex items-start">
+              <AlertTriangle className="w-6 h-6 text-red-500 mr-2" />
               <p className="font-medium">{error}</p>
             </div>
           )}

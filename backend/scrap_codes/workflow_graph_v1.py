@@ -16,8 +16,6 @@ class State(TypedDict):
     messages: List
     # List of tools that the agent can use (like fraud checkers, news fetcher)
     available_tools: List[str]
-    # The final decision or intermediate decision (e.g., "likely fraud", "clean", "fetch more data")
-    decision: Optional[str]
     # A step-by-step log of actions or reasoning the LLM performed
     list_of_actions: List[str]
     # Result of URL fraud detection (True = fraud, False = clean, None if not checked)
@@ -34,6 +32,7 @@ class State(TypedDict):
     executed_tools: List[str]  # Track which tools have been executed
     is_fake_news: Optional[bool]  # Result of news verification (True=fake, False=legitimate, None=not checked)
     news_verification_requested: Optional[bool]  # Flag to track if news verification has been requested
+    is_irrelevant_input: Optional[bool]  # Flag to track if the input is irrelevant to fraud detection
 
 # ------------------ Initialize the LLM instance ----------------------
 
@@ -63,6 +62,8 @@ When a user asks about news, use the fetch_real_time_news_tool to get recent hea
 - Always explain your reasoning based on the specific news articles you retrieved
 
 Be thorough in your analysis and explain your reasoning.
+
+IMPORTANT: If the user input is NOT related to fraud detection or doesn't contain any email, SMS, URL, or news to analyze, respond with a firm but polite message explaining that you are a fraud detection assistant and can only help with analyzing digital communications for fraud. DO NOT attempt to answer unrelated questions or engage with irrelevant input. Make it clear that the user needs to provide content for fraud analysis.
 
 IMPORTANT: After completing your analysis, ALWAYS provide a final conclusion that summarizes your findings. This will be used as the final reasoning summary.
 """
@@ -98,6 +99,7 @@ def llm_node(state: State) -> State:
     4. Decides which tools to use
     5. Provides a response to the user
     6. For news queries, analyzes returned news articles to check if user's claim is supported
+    7. Handles irrelevant inputs that don't match any of the expected types
     """
     messages = state["messages"]
     
@@ -116,6 +118,8 @@ def llm_node(state: State) -> State:
         state["news_verification_requested"] = False
     if "final_reasoning_summary" not in state:
         state["final_reasoning_summary"] = None
+    if "is_irrelevant_input" not in state:
+        state["is_irrelevant_input"] = False
     
     # Ensure the system message is only added once
     if not any(isinstance(msg, SystemMessage) for msg in messages):
@@ -140,7 +144,10 @@ def llm_node(state: State) -> State:
         2. I've already extracted these URLs from the query: {extracted_urls if extracted_urls else 'None'}
         3. Decide which tools you need to use for fraud detection
         4. Update your understanding based on tool results
-        5. End your response with a clear FINAL CONCLUSION paragraph summarizing your findings.
+        5. If the user query doesn't contain any email, SMS, URL, or news to analyze, mark it as irrelevant and respond accordingly
+        6. End your response with a clear FINAL CONCLUSION paragraph summarizing your findings.
+        
+        IMPORTANT: If the input does not appear to be related to fraud detection (email, SMS, URL, or news), respond with a firm but polite message stating that you are a fraud detection assistant and can only help with analyzing potential fraud in digital communications. DO NOT engage with irrelevant questions or inputs.
         """))
     
     # Check if news has been fetched and needs verification
@@ -257,7 +264,45 @@ def llm_node(state: State) -> State:
                 content = ai_response.content.lower()
                 possible_types = ["email", "sms", "url", "news"]
                 detected_types = [t for t in possible_types if t in content]
-                if detected_types:
+                
+                # Check if the response indicates this is an irrelevant input
+                irrelevant_indicators = [
+                    "i am a fraud detection assistant",
+                    "i can only help with",
+                    "i'm a fraud detection assistant",
+                    "i'm designed to analyze",
+                    "not related to fraud detection",
+                    "doesn't contain any email, sms, url, or news",
+                    "not an email, sms, url, or news",
+                    "please provide a digital communication",
+                    "i can only assist with fraud detection",
+                    "not within my scope"
+                ]
+                
+                is_irrelevant = any(indicator in content for indicator in irrelevant_indicators)
+                
+                if is_irrelevant:
+                    state["is_irrelevant_input"] = True
+                    state["input_types"] = ["irrelevant"]
+                    state["list_of_actions"].append("Detected irrelevant input not related to fraud detection")
+                    
+                    # Extract the final reasoning summary for irrelevant input
+                    if "final conclusion" in content:
+                        final_conclusion = content.split("final conclusion")[1].strip()
+                        if ":" in final_conclusion:
+                            final_conclusion = final_conclusion.split(":", 1)[1].strip()
+                        if "\n\n" in final_conclusion:
+                            final_conclusion = final_conclusion.split("\n\n")[0].strip()
+                        elif "\n" in final_conclusion:
+                            final_conclusion = final_conclusion.split("\n")[0].strip()
+                        state["final_reasoning_summary"] = final_conclusion
+                    else:
+                        # Default message for irrelevant inputs
+                        state["final_reasoning_summary"] = "I am a fraud detection assistant. I can only help with analyzing potential fraud in digital communications (emails, SMS, URLs, or news)."
+                    
+                    state["list_of_actions"].append("Set final reasoning summary for irrelevant input")
+                    
+                elif detected_types:
                     state["input_types"] = detected_types
                     state["list_of_actions"].append(f"Detected input types: {', '.join(detected_types)}")
                     # If "news" is detected but not yet checked, set is_fake_news to None to indicate it needs verification
@@ -393,10 +438,15 @@ def should_continue(state: State) -> Literal["tool_node", "llm", END]: # type: i
     2. Decides whether to continue to the tool node or end execution
     3. Ends if all necessary tools have been executed or if a final assessment has been made
     4. Special handling for news verification to ensure it completes properly
+    5. Ends immediately if the input is determined to be irrelevant
     """
     messages = state["messages"]
     
     if not messages:
+        return END
+    
+    # If the input is irrelevant and we have a final reasoning summary, end immediately
+    if state.get("is_irrelevant_input", False) and state.get("final_reasoning_summary"):
         return END
     
     # Special case: If news has been fetched but not verified, continue to LLM node
@@ -444,6 +494,8 @@ def should_continue(state: State) -> Literal["tool_node", "llm", END]: # type: i
         executed_all_relevant_tools = True
     if "news" in input_types and "is_fake_news" in state and state["is_fake_news"] is not None:
         executed_all_relevant_tools = True
+    if "irrelevant" in input_types:
+        executed_all_relevant_tools = True
     
     # If the last message is a tool response and all relevant tools executed, we need a final LLM call for conclusion
     if isinstance(messages[-1], ToolMessage) and executed_all_relevant_tools:
@@ -483,7 +535,10 @@ workflow_graph = graph_builder.compile()
 if __name__ == '__main__':
     try:
         initial_state = {
-            "user_query": r"""https://google.com is this given url fishy or not can you check real quick ?
+            "user_query": r"""SAM-OFFER FOR YOU. I can get you
+    approved for a no-interest credit
+    card today ONLY. Learn more:
+    aihfori.it.car.com
             """,
             "input_types": [],
             "messages": [],
@@ -493,7 +548,6 @@ if __name__ == '__main__':
                 "check_fraud_url_tool",
                 "fetch_real_time_news_tool"
             ],
-            "decision": None,
             "list_of_actions": [],
             "is_fraud_url": None,
             "is_fraud_sms": None,
@@ -503,7 +557,8 @@ if __name__ == '__main__':
             "url_list": [],
             "executed_tools": [],
             "is_fake_news": None,
-            "news_verification_requested": None
+            "news_verification_requested": None,
+            "is_irrelevant_input": None
         }
 
         final_state = workflow_graph.invoke(initial_state)
@@ -521,7 +576,6 @@ if __name__ == '__main__':
                 print(f"  {i}. [{msg_type}] {msg_preview}")
             
             print(f"\navailable_tools: {state.get('available_tools', [])}")
-            print(f"decision: {state.get('decision')}")
             
             print("\nlist_of_actions:")
             actions = state.get("list_of_actions", [])
@@ -554,6 +608,7 @@ if __name__ == '__main__':
                 print("  (empty)")
             
             print(f"\nis_fake_news: {state.get('is_fake_news')}")
+            print(f"\nis_irrelevant_input: {state.get('is_irrelevant_input')}")
             print("\n===== END OF STATE =====")
 
         pretty_print_state(final_state)

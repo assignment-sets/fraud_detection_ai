@@ -90,7 +90,6 @@ const ResultsDisplay = ({ results }) => {
           </div>
         </div>
       </div>
-
     </div>
   );
 };

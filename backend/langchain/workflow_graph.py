@@ -120,6 +120,12 @@ def llm_node(state: State) -> State:
         state["final_reasoning_summary"] = None
     if "is_irrelevant_input" not in state:
         state["is_irrelevant_input"] = False
+    if "is_fraud_url" not in state:
+        state["is_fraud_url"] = None
+    if "is_fraud_sms" not in state:
+        state["is_fraud_sms"] = None
+    if "is_fraud_email" not in state:
+        state["is_fraud_email"] = None
     
     # Ensure the system message is only added once
     if not any(isinstance(msg, SystemMessage) for msg in messages):
@@ -313,7 +319,7 @@ def llm_node(state: State) -> State:
             # Check if we need to extract a final reasoning summary
             if not getattr(ai_response, "tool_calls", []) and not state["final_reasoning_summary"]:
                 content = ai_response.content.lower()
-                
+            
                 # Look for a final conclusion section
                 if "final conclusion" in content:
                     # Get text after "final conclusion"
@@ -329,12 +335,31 @@ def llm_node(state: State) -> State:
                     
                     state["final_reasoning_summary"] = final_conclusion
                     state["list_of_actions"].append("Extracted final reasoning summary from conclusion section")
-                else:
-                    # If no specific final conclusion, use the last paragraph as the summary
-                    paragraphs = ai_response.content.split("\n\n")
-                    if paragraphs:
-                        state["final_reasoning_summary"] = paragraphs[-1].strip()
-                        state["list_of_actions"].append("Used last paragraph as final reasoning summary")
+                    
+                    # Check if we need to update any fraud flags based on the conclusion
+                    if "url" in state.get("input_types", []) and state["is_fraud_url"] is None:
+                        if "fraud" in final_conclusion or "malicious" in final_conclusion or "phishing" in final_conclusion:
+                            state["is_fraud_url"] = True
+                            state["list_of_actions"].append("Updated is_fraud_url to True based on conclusion")
+                        elif "safe" in final_conclusion or "legitimate" in final_conclusion:
+                            state["is_fraud_url"] = False
+                            state["list_of_actions"].append("Updated is_fraud_url to False based on conclusion")
+                    
+                    if "sms" in state.get("input_types", []) and state["is_fraud_sms"] is None:
+                        if "fraud" in final_conclusion or "scam" in final_conclusion:
+                            state["is_fraud_sms"] = True
+                            state["list_of_actions"].append("Updated is_fraud_sms to True based on conclusion")
+                        elif "safe" in final_conclusion or "legitimate" in final_conclusion:
+                            state["is_fraud_sms"] = False
+                            state["list_of_actions"].append("Updated is_fraud_sms to False based on conclusion")
+                    
+                    if "email" in state.get("input_types", []) and state["is_fraud_email"] is None:
+                        if "fraud" in final_conclusion or "phishing" in final_conclusion or "scam" in final_conclusion:
+                            state["is_fraud_email"] = True
+                            state["list_of_actions"].append("Updated is_fraud_email to True based on conclusion")
+                        elif "safe" in final_conclusion or "legitimate" in final_conclusion:
+                            state["is_fraud_email"] = False
+                            state["list_of_actions"].append("Updated is_fraud_email to False based on conclusion")
         
         except Exception as e:
             print("❌ ERROR in LLM invocation:", str(e))
@@ -486,16 +511,26 @@ def should_continue(state: State) -> Literal["tool_node", "llm", END]: # type: i
     input_types = state.get("input_types", [])
     executed_all_relevant_tools = False
     
-    if "url" in input_types and "is_fraud_url" in state:
+    if not input_types:
+        # If we can't determine input types yet, we need more processing
+        executed_all_relevant_tools = False
+    elif "irrelevant" in input_types:
+        # Irrelevant inputs don't need tool execution
         executed_all_relevant_tools = True
-    if "email" in input_types and "is_fraud_email" in state:
-        executed_all_relevant_tools = True
-    if "sms" in input_types and "is_fraud_sms" in state:
-        executed_all_relevant_tools = True
-    if "news" in input_types and "is_fake_news" in state and state["is_fake_news"] is not None:
-        executed_all_relevant_tools = True
-    if "irrelevant" in input_types:
-        executed_all_relevant_tools = True
+    else:
+        # For each detected input type, check if the relevant tool has been executed
+        type_checks = []
+        if "url" in input_types:
+            type_checks.append(state.get("is_fraud_url") is not None)
+        if "email" in input_types:
+            type_checks.append(state.get("is_fraud_email") is not None)
+        if "sms" in input_types:
+            type_checks.append(state.get("is_fraud_sms") is not None)
+        if "news" in input_types:
+            type_checks.append(state.get("is_fake_news") is not None)
+        
+        # Only consider all tools executed if we have at least one type and all types have been checked
+        executed_all_relevant_tools = len(type_checks) > 0 and all(type_checks)
     
     # If the last message is a tool response and all relevant tools executed, we need a final LLM call for conclusion
     if isinstance(messages[-1], ToolMessage) and executed_all_relevant_tools:

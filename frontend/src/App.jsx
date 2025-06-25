@@ -22,7 +22,7 @@ function App() {
     setError(null);
 
     try {
-      const response = await axios.post("http://localhost:5000/analyze", {
+      const response = await axios.post("http://localhost:8000/analyze", {
         user_query: text,
       });
 

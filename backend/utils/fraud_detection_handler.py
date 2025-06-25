@@ -6,7 +6,6 @@ import re
 import numpy
 import dotenv
 import requests
-import time
 
 dotenv.load_dotenv()
 
@@ -36,7 +35,6 @@ class FraudDetectionHandler:
                 'models/xgb_phishing_url_model_768.json')
 
             self.embedder = SentenceTransformer(self.embedding_model)
-            # print("✅ All models loaded successfully into memory")
         except Exception as e:
             print(f"⚠️ An error occurred while loading models: {e}")
             self.fraud_email_model = None
@@ -122,6 +120,3 @@ class FraudDetectionHandler:
             print(f"⚠️ Error generating embedding: {str(e)}")
             return numpy.array([])
 
-
-if __name__ == '__main__':
-    pass

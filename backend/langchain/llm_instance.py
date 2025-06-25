@@ -8,19 +8,33 @@ langchain.verbose = False
 langchain.debug = False
 langchain.llm_cache = False
 
-class LLMInstance:
-    def __init__(self):
-        load_dotenv()
-        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-        self.system_prompt = self._get_system_prompt()
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
-            api_key=GOOGLE_API_KEY,
-            temperature=0.7
-        )
-        # print("✅ LLM Instance Initialized Successfully!")
 
-    def _get_system_prompt(self) -> str:
+class LLMInstance:
+    _instance = None
+    _llm = None
+    _system_prompt = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(LLMInstance, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if self._llm is None:
+            load_dotenv()
+            api_key = os.getenv("GOOGLE_API_KEY")
+            self._system_prompt = self._set_system_prompt()
+            self._llm = ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash", api_key=api_key, temperature=0.7
+            )
+
+    def get_llm(self):
+        return self._llm
+
+    def get_system_prompt(self):
+        return self._system_prompt
+
+    def _set_system_prompt(self) -> str:
         return """
         You are a fraud detection assistant that helps users identify potential fraud in digital communications.
         Your job is to analyze the user's query and determine what type of content it contains (email, SMS, URL, news) and check for signs of fraud.
@@ -44,10 +58,8 @@ class LLMInstance:
         - Always explain your reasoning based on the specific news articles you retrieved
 
         Be thorough in your analysis and explain your reasoning.
-        """
 
-# Example (for testing if run standalone)
-if __name__ == "__main__":
-    llm_instance = LLMInstance()
-    response = llm_instance.llm.invoke("hello how you doing")
-    print(response)
+        IMPORTANT: If the user input is NOT related to fraud detection or doesn't contain any email, SMS, URL, or news to analyze, respond with a firm but polite message explaining that you are a fraud detection assistant and can only help with analyzing digital communications for fraud. DO NOT attempt to answer unrelated questions or engage with irrelevant input. Make it clear that the user needs to provide content for fraud analysis.
+
+        IMPORTANT: After completing your analysis, ALWAYS provide a final conclusion that summarizes your findings. This will be used as the final reasoning summary.
+        """

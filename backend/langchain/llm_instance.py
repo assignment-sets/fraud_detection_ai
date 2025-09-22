@@ -25,7 +25,7 @@ class LLMInstance:
             api_key = os.getenv("GOOGLE_API_KEY")
             self._system_prompt = self._set_system_prompt()
             self._llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash", api_key=api_key, temperature=0.7
+                model="gemini-2.5-flash", api_key=api_key, temperature=0.7
             )
 
     def get_llm(self):

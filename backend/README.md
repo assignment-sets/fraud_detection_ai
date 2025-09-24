@@ -1,66 +1,107 @@
-# sms query : 
-    this is a sms which i recieved please check if its likely fraud or legit : 
-    Congratulations! 🎉 You have been selected to receive a $500 Amazon Gift Card. Please verify your details now at www.amz-prize-claim.com to claim your reward. Offer expires in 24 hours! Reply STOP to unsubscribe.
+## How to Run Locally
 
-    SAM-OFFER FOR YOU. I can get you
-    approved for a no-interest credit
-    card today ONLY. Learn more:
-    aihfori.it.car.com
+1. Comment out `handler = Mangum(app)` in `main.py`.
+2. Run the following command:
 
-# fake news realtime : 
-    hey i have just recieved the news that narendra modi died is it true ?
+```bash
+uvicorn main:app --reload
+```
 
-# fake news old :
-    someone gave me the news that india looted british is that true ? or is it vice versa
+---
 
-# fake email : 
-    Subject: Important Notice: Account Suspension Warning
-    Dear Valued Customer,
-    We have detected unusual activity on your bank account and it has been temporarily suspended for your security.
-    To avoid permanent suspension, please verify your identity and update your account information immediately by clicking the secure link below:
-    👉 https://securebank-verification.com
+## SMS Query
 
-    Failure to do so within the next 48 hours will result in permanent account deactivation.
+> This is an SMS which I received. Please check if it's likely fraud or legit:
 
-    Thank you for your immediate attention to this matter.
+```
+Congratulations! 🎉 You have been selected to receive a $500 Amazon Gift Card. Please verify your details now at www.amz-prize-claim.com to claim your reward. Offer expires in 24 hours! Reply STOP to unsubscribe.
+```
 
-    Sincerely,
-    The Security Team
-    Bank of America (or insert any popular bank name)
+```
+SAM-OFFER FOR YOU. I can get you
+approved for a no-interest credit
+card today ONLY. Learn more:
+aihfori.it.car.com
+```
 
+---
 
-# urls
+## Fake News (Realtime)
 
-## legit urls:
-    are these given urls legit or not can you check real quick ?
-        https://google.com 
-        https://wikipedia.com
-        www.google.com
-        www.amazon.com
+> Hey, I have just received the news that PM Modi died. Is it true?
 
-## fake urls : 
-    http://secure-paypal-account-verification.com
-    https://amazon-prime-membership-alert.xyz
-    http://appleid-login-helpcenter.net
+---
 
-    www.dghjdgf.com/paypal.co.uk/cycgi-bin/webscrcmd=_home-customer&nav=1/loading.php,
-    serviciosbys.com/paypal.cgi.bin.get-into.herf.secure.dispatch35463256rzr321654641dsf654321874/href,
-    mail.printakid.com/www.online.americanexpress.com/index.html
+## Fake News (Old)
 
+> Someone gave me the news that India looted British. Is that true?
 
-# full test : 
-    {
-        "user_query": "Hey, I got this email. Can you check if it's a scam?\n\nSubject: Urgent! Your PayPal Account Has Been Limited\n\nDear Customer,\n\nWe've noticed suspicious activity on your PayPal account. To restore access, please confirm your identity immediately by clicking the secure link below:\n👉 https://paypal-security-verification.com\n\nFailure to do so will result in account suspension.\n\nBest regards,\nPayPal Security Team"
-    }
+---
 
-    {
-        "user_query": "Just got this text message. Looks kinda sketchy, can you verify?\n\n🎁 CONGRATS! You've won a free iPhone 15! Click here to claim now: www.freeiphone-gift.com\n\nReply STOP to opt out."
-    }
+## Fake Email
 
-    {
-        "user_query": "Hey, can you check if this website is safe?\n\nhttps://securelogin-bankofamerica.com"
-    }
+**Subject:** Important Notice: Account Suspension Warning
 
-    {
-        "user_query": "I just heard that NASA announced an alien spaceship landed in New York. Is this real?"
-    }
+> Dear Valued Customer,  
+> We have detected unusual activity on your bank account and it has been temporarily suspended for your security.  
+> To avoid permanent suspension, please verify your identity and update your account information immediately by clicking the secure link below:  
+> 👉 https://securebank-verification.com  
+>
+> Failure to do so within the next 48 hours will result in permanent account deactivation.  
+>
+> Thank you for your immediate attention to this matter.  
+>
+> Sincerely,  
+> The Security Team  
+> Bank of America (or insert any popular bank name)
+
+---
+
+## URLs
+
+### Legit URLs
+
+Are these given URLs legit or not? Can you check real quick?
+
+- https://google.com
+- https://wikipedia.com
+- www.google.com
+- www.amazon.com
+
+### Fake URLs
+
+- http://secure-paypal-account-verification.com
+- https://amazon-prime-membership-alert.xyz
+- http://appleid-login-helpcenter.net
+- www.dghjdgf.com/paypal.co.uk/cycgi-bin/webscrcmd=_home-customer&nav=1/loading.php
+- serviciosbys.com/paypal.cgi.bin.get-into.herf.secure.dispatch35463256rzr321654641dsf654321874/href
+- mail.printakid.com/www.online.americanexpress.com/index.html
+
+---
+
+## Test Prompts
+
+```json
+{
+    "user_query": "Hey, I got this email. Can you check if it's a scam?\n\nSubject: Urgent! Your PayPal Account Has Been Limited\n\nDear Customer,\n\nWe've noticed suspicious activity on your PayPal account. To restore access, please confirm your identity immediately by clicking the secure link below:\n👉 https://paypal-security-verification.com\n\nFailure to do so will result in account suspension.\n\nBest regards,\nPayPal Security Team"
+}
+```
+
+```json
+{
+    "user_query": "Just got this text message. Looks kinda sketchy, can you verify?\n\n🎁 CONGRATS! You've won a free iPhone 15! Click here to claim now: www.freeiphone-gift.com\n\nReply STOP to opt out."
+}
+```
+
+```json
+{
+    "user_query": "Hey, can you check if this website is safe?\n\nhttps://securelogin-bankofamerica.com"
+}
+```
+
+```json
+{
+    "user_query": "I just heard that NASA announced an alien spaceship landed in New York. Is this real?"
+}
+```
+
